@@ -88,25 +88,36 @@ class MudAgent:
             logger.info(f"已连接到 {HOST}:{PORT}")
             self.write_log(f"已连接到 {HOST}:{PORT}\n")
 
-            # 等待欢迎屏幕
+            # 等待服务器欢迎信息
             time.sleep(2)
-            self.read_and_log()
-
-            # 发送用户名
+            welcome = self.read_and_log()
+            
+            # 等待编码选择提示
+            if "Input 1 for GBK, 2 for UTF8, 3 for BIG5" in welcome:
+                logger.info("选择UTF-8编码...")
+                self.telnet_conn.write(b'2\n')
+                time.sleep(2)
+                self.read_and_log()
+            
+            # 发送用户名并等待密码提示
             logger.info(f"发送用户名: {USERNAME}")
             self.telnet_conn.write(USERNAME.encode('utf-8') + b'\n')
-            time.sleep(1)
-            self.read_and_log()
-
-            # 发送密码
-            logger.info("发送密码...")
-            self.telnet_conn.write(PASSWORD.encode('utf-8') + b'\n')
-            time.sleep(1)
-            self.read_and_log()
-
-            # 登录后处理编码选择(选择UTF-8)
-            time.sleep(0.5)
-            self.telnet_conn.write(b'2\n')
+            time.sleep(2)
+            response = self.read_and_log()
+            
+            if "此ID档案已存在，请输入密码" in response:
+                # 发送密码
+                logger.info("发送密码...")
+                self.telnet_conn.write(PASSWORD.encode('utf-8') + b'\n')
+                time.sleep(2)
+                response = self.read_and_log()
+                
+                # 检查是否需要处理重复登录
+                if "您要将另一个连线中的相同人物赶出去，取而代之吗？" in response:
+                    logger.info("处理重复登录...")
+                    self.telnet_conn.write(b'y\n')
+                    time.sleep(2)
+                    self.read_and_log()
 
             self.write_log("登录完成！会话已在后台运行。\n")
             self.write_log("- 使用 'tail -f mud_output.log' 查看MUD输出\n")

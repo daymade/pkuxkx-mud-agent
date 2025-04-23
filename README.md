@@ -111,9 +111,9 @@ MUD_PASSWORD=your_password
 
 ## 使用方法
 
-1. 启动代理：
+1. 后台启动代理：
 ```bash
-python mud_agent.py
+python3 mud_agent.py &
 ```
 
 2. 查看游戏输出：
