@@ -57,6 +57,18 @@ kill $(cat mud.pid)
 - `q` - 退出查看
 - `b` - 查看上一页
 
+## 探索与互动命令 (已发现)
+
+- `look` / `l` - 查看当前环境、物品或人物 (e.g., `look`, `look path`, `look hu lu`)
+- `hp` - 查看角色状态
+- `score` - 查看角色详细信息
+- `jq` / `jobquery` - 查询当前任务进度
+- `north` / `south` / `east` / `west` - 基本方向移动
+- `climb up` / `climb down` - 攀爬特定路径
+- `get <物品ID>` - 拾取地上的物品 (e.g., `get hu lu`)
+- `knock <对象ID>` - 敲击目标 (e.g., `knock gate`)
+- `q` - 退出分页显示 (如 help 输出)
+
 ## 注意事项
 
 1. 确保在运行客户端前已安装所有必要的依赖
