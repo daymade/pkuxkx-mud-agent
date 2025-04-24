@@ -47,8 +47,15 @@ class MudAgent:
     def __init__(self):
         self.running = True
         self.telnet_conn = None
-        # Simplified but robust regex for common ANSI escape codes ending in a letter
-        self.ansi_escape_pattern = re.compile(r'\x1b\\[[0-9;?]*[a-zA-Z]')
+        # 更完整的ANSI转义序列匹配模式，包含所有常见格式
+        # 匹配形如 \x1B[ ... 的CSI序列，以及其他转义序列
+        self.ansi_escape_pattern = re.compile(
+            r'\x1b(?:[@-Z\\-_]|\[[0-9:;<=>?]*[ -/]*[@-~])'
+        )
+        # 匹配可能的中括号加数字格式的非标准序列
+        self.bracket_code_pattern = re.compile(r'\[[0-9;]+[a-zA-Z]')
+        # 用于将假ANSI转换为真ANSI的正则
+        self.bracket_to_ansi_pattern = re.compile(r'\[([0-9;]+)m')
         self.setup_files()
         self.setup_signal_handlers()
 
@@ -76,15 +83,37 @@ class MudAgent:
         signal.signal(signal.SIGTERM, self.handle_signal)
         atexit.register(self.cleanup)
 
+    def clean_ansi_codes(self, text):
+        """清除文本中的所有ANSI转义序列和特殊字符"""
+        # 先处理标准ANSI转义序列
+        text = self.ansi_escape_pattern.sub('', text)
+        # 处理其他可能的非标准格式
+        text = self.bracket_code_pattern.sub('', text)
+        # 替换Unicode替换字符
+        text = text.replace('\uFFFD', '')
+        # 特殊处理非标准的MXP相关代码
+        text = text.replace('[1z', '')
+        return text
+        
+    def convert_bracket_to_ansi(self, text):
+        """将假ANSI码（如[1;32m）转换为真ANSI码（\x1b[1;32m）"""
+        # 使用ASCII转义字符(ESC, 0x1B, 27)
+        # 不用 \x1b 而用 \033 来避免正则替换中的转义问题
+        return self.bracket_to_ansi_pattern.sub('\033[\\1m', text)
+
+    def print_mud_text(self, text):
+        """
+        打印MUD文本到终端，将假ANSI转为真ANSI
+        而不是通过logger打印，避免伪ANSI在日志中显示
+        """
+        console_text = self.convert_bracket_to_ansi(text)
+        print(console_text, end="", flush=True)
+
     def write_log(self, message):
         """写入日志文件，移除ANSI转义码和特定代码/字符"""
         try:
-            # Remove ANSI escape codes
-            cleaned_message = self.ansi_escape_pattern.sub('', message)
-            # Remove specific observed non-standard codes like [1z (already handled by broader regex likely, but keep for safety)
-            cleaned_message = cleaned_message.replace('[1z', '')
-            # Remove the replacement character U+FFFD
-            cleaned_message = cleaned_message.replace('\uFFFD', '')
+            # 清除所有ANSI和特殊代码，确保日志文件是纯文本
+            cleaned_message = self.clean_ansi_codes(message)
             with open(LOG_FILE, 'a', encoding='utf-8') as f:
                 f.write(cleaned_message)
         except Exception as e:
@@ -111,43 +140,32 @@ class MudAgent:
             # 发送用户名
             logger.info(f"发送用户名: {USERNAME}")
             self.telnet_conn.write(USERNAME.encode('utf-8') + b'\n')
-            time.sleep(3) # Increased wait
+            time.sleep(3) 
             response_after_user = self.read_and_log()
 
-            # 检查是否需要密码 - 使用更通用的检查
-            if "密码" in response_after_user: # Check if the word "密码" (password) is present
+            # 检查是否需要密码 - 不再直接打印MUD输出
+            if "密码" in response_after_user: 
                 logger.info("检测到密码提示，准备发送密码...")
                 self.telnet_conn.write(PASSWORD.encode('utf-8') + b'\n')
-                logger.info("密码已发送。") # Log immediately after write
-                logger.info("等待服务器响应密码...")
-                time.sleep(4) # Increase wait slightly more
-                logger.info("等待结束，尝试读取密码后响应...")
+                logger.info("密码已发送")
+                logger.info("等待服务器响应...")
+                time.sleep(4)
                 response_after_pass = self.read_and_log()
-                logger.info(f"读取密码后响应完成。响应内容 (前100字符): {response_after_pass[:100] if response_after_pass else '无响应'}")
+                logger.info("密码响应读取完成")
 
-                # 检查重复登录
-                # Use response_after_pass which now holds the result
+                # 检查重复登录 - 不再把MUD响应内容传给logger
                 if response_after_pass and "您要将另一个连线中的相同人物赶出去，取而代之吗？" in response_after_pass:
                     logger.info("检测到重复登录提示，准备处理...")
                     self.telnet_conn.write(b'y\n')
-                    logger.info("重复登录处理'y'已发送。")
-                    logger.info("等待服务器响应重复登录处理...")
-                    time.sleep(4) # Increase wait slightly more
-                    logger.info("等待结束，尝试读取重复登录处理后响应...")
-                    response_after_kick = self.read_and_log()
-                    logger.info(f"读取重复登录处理后响应完成。响应内容 (前100字符): {response_after_kick[:100] if response_after_kick else '无响应'}")
+                    logger.info("重复登录处理'y'已发送")
+                    logger.info("等待服务器响应...")
+                    time.sleep(4)
+                    self.read_and_log() # 不再把响应存储或传递给logger
 
-                    # 记录重复登录处理后的响应（调试用）
-                    if response_after_kick:
-                        logger.info(f"重复登录处理后响应 (完整日志记录): {response_after_kick[:100]}...") # Log first 100 chars
-                # 注意：这里仍然缺少对登录是否 *真正* 成功的明确检查。
-                # 需要根据 MUD 登录成功后的实际提示信息添加检查。
-                # 例如: if "成功进入" in response_after_pass or "成功进入" in response_after_kick: logger.info("登录成功！")
-
-            elif "欢迎" in response_after_user: # 检查是否无需密码就登录了（对于已存在用户不太可能）
-                 logger.info("似乎已登录（无密码提示）。")
+            elif "欢迎" in response_after_user:
+                logger.info("似乎已登录（无密码提示）")
             else:
-                 logger.warning(f"发送用户名后未收到预期响应。响应: {response_after_user[:100]}...")
+                logger.info("发送用户名后未检测到预期的密码提示或欢迎信息")
 
             # 在尝试登录流程后记录消息
             self.write_log("登录流程尝试完成。会话应在后台运行。\n")
@@ -162,12 +180,20 @@ class MudAgent:
             return False
 
     def read_and_log(self):
-        """读取MUD输出，记录到日志（通过write_log进行清理）并返回原始文本"""
+        """读取MUD输出，处理为三种用途：打印到终端、记录到日志、返回原始文本"""
         try:
             data = self.telnet_conn.read_very_eager()
             if data:
+                # 解码为文本
                 text = data.decode('utf-8', errors='replace')
+                
+                # 1. 打印到终端（确保是彩色的）
+                self.print_mud_text(text)
+                
+                # 2. 写入日志（清理后的纯文本）
                 self.write_log(text)
+                
+                # 3. 返回原始文本（供其他函数处理，如检查登录响应）
                 return text
         except Exception as e:
             logger.error(f"读取输出错误: {e}")
@@ -229,34 +255,42 @@ class MudAgent:
         """持续读取MUD输出"""
         while self.running:
             try:
+                # 使用 expect 等待任何数据或超时
                 index, match, data = self.telnet_conn.expect([b'.+'], timeout=0.1)
 
                 if index != -1 and data:
+                    # 解码为文本
                     text = data.decode('utf-8', errors='replace')
+                    
+                    # 1. 打印到终端（确保是彩色的）
+                    self.print_mud_text(text)
+                    
+                    # 2. 写入日志（清理后的纯文本）
                     self.write_log(text)
 
             except EOFError:
                  if self.running:
-                    logger.error(f"连接中断 (EOF)。")
-                    self.write_log(f"\n连接中断 (EOF)。 尝试重新连接...\\n")
+                    logger.error("连接中断 (EOF)")
+                    self.write_log("\n连接中断 (EOF)。 尝试重新连接...\n")
                     if self.connect():
                          logger.info("重新连接成功！")
-                         self.write_log("重新连接成功！\\n")
+                         self.write_log("重新连接成功！\n")
                     else:
-                         logger.error("重新连接失败，退出程序。")
-                         self.write_log("重新连接失败，退出程序。\\n")
+                         logger.error("重新连接失败，退出程序")
+                         self.write_log("重新连接失败，退出程序。\n")
                          self.running = False
                          break
             except Exception as e:
                 if self.running:
+                    # 记录其他错误，可能需要不同的重连逻辑
                     logger.error(f"读取时发生错误: {e}")
-                    self.write_log(f"\n读取时发生错误: {e}. 尝试重新连接...\\n")
+                    self.write_log(f"\n读取时发生错误: {e}. 尝试重新连接...\n")
                     if self.connect():
                         logger.info("重新连接成功！")
-                        self.write_log("重新连接成功！\\n")
+                        self.write_log("重新连接成功！\n")
                     else:
-                        logger.error("重新连接失败，退出程序。")
-                        self.write_log("重新连接失败，退出程序。\\n")
+                        logger.error("重新连接失败，退出程序")
+                        self.write_log("重新连接失败，退出程序。\n")
                         self.running = False
                         break
 
