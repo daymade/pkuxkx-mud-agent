@@ -1,0 +1,17 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+
+[usage.md](mdc:docs/usage.md)
+
+在终端中执行以下命令启动客户端：
+```bash
+python3 mud_agent.py &
+```
+注意：末尾的 `&` 表示在后台运行。
+
+你执行一个命令后应该始终自行检查输出，决定下一步动作，不需要中断要求我决策。
+
+遇到 “== 未完继续 15% == (q 离开，[1;36mb 前一页，其他继续下一页)“ 就输入 q 离开
